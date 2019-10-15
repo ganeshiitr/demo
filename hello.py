@@ -1,42 +1,85 @@
-import urllib2
-from bs4 import BeautifulSoup
+import sys
+import os
+import ast
+import re
+import configparser
+import importlib
+from collections import defaultdict
+import logging
+import pandas as pd
 
-#definition of functions used
-# def my_function():
-    # print("Hello From My Function!")
+def get_config(path):
+    if os.path.exists(path):
+        logging.info("Reading Config File %s"%path)
+        app_config = configparser.SafeConfigParser(allow_no_value=True)
+        app_config.read(path)
+        config_values = defaultdict(dict)
 
-# def my_function_with_args(username, greeting):
-    # print("Hello, %s , From My Function!, I wish you %s"%(username, greeting))
+        for section in app_config.keys()[1:]:
+            config_values[section] = defaultdict(dict)
+            for item in app_config[section].keys():
+                value = app_config.get(section, item, raw=True)
+                if value and len(value) > 0 and value[0] in ("[", "{", "("): #This Handles all Data Structure Too
+                    config_values[section][item] = ast.literal_eval(value)
+                else:
+                    try:
+                        config_values[section][item] = ast.literal_eval(value)
+                    except Exception as e:
+                        config_values[section][item] = value
+                        
+        return config_values
+    else:
+        logging.critical("Config File Not Found! Location Provided : %s"%path)
+        sys.exit(1)
 
 
-def sum_two_numbers(a, b):
-    return a + b
+config_dict = get_config("router_config.ini")
 
+mod_list = []
+for key in config_dict['rules']:
+    temp_list = key.split(".") + [config_dict['rules'][key]]
+    mod_list.append(temp_list)
+    
+rule_table = pd.DataFrame(
+    mod_list,
+    columns=["customer", "country", "state", "city", "server"]
+) 
 
-#calling of functions
-# my_function()
-# my_function_with_args("John Doe", "a great year!")
-x = sum_two_numbers(1,2)
+def find_route(temp_str):
+    temp_list = temp_str.split(".")
+    cust_list = set(rule_table['customer'])
+    country_list = set(rule_table['country'])
+    state_list = set(rule_table['state'])
+    city_list = set(rule_table['city'])
 
-#printing vlaue
-# print x
+    filter_dict = {}
 
+    if temp_list[0] in cust_list:
+        filter_dict['customer'] = temp_list[0] 
+    else:
+        filter_dict['customer'] = '*'
+    if temp_list[1] in country_list:
+        filter_dict['country'] = temp_list[1] 
+    else:
+        filter_dict['country'] = '*'
+    if temp_list[2] in state_list:
+        filter_dict['state'] = temp_list[2]
+    else:
+        filter_dict['state'] = '*'
+    if temp_list[3] in city_list:
+        filter_dict['city'] = temp_list[3] 
+    else:
+        filter_dict['city'] = '*'
+    query = " & ".join(["{}=='{}'".format(k, v) for k, v in filter_dict.items()])
+    res = rule_table.query(query)
+    return res
 
-wiki = "https://en.wikipedia.org/wiki/List_of_state_and_union_territory_capitals_in_India"
-page = urllib2.urlopen(wiki)
-# print page
-soup = BeautifulSoup(page,"html.parser")
+print find_route("customer1.us.ca.sfo")
 
-right_table=soup.find('table', class_='wikitable sortable plainrowheaders')
-trs = right_table.findAll("tr")
-for each_tr in trs:
-    # print each_tr
-    th = each_tr.findAll("th")
-    # print th
-    # print th[0].find(text=True)
-    tds = each_tr.findAll("td")
-    if len(tds) < 1:
-        continue
-    print  tds[0].find(text=True), th[0].find(text=True), tds[1].find(text=True), tds[4].find(text=True)
-    # for eachtd in tds:
-    #     print eachtd.text
+print find_route("customer1.us.ca.sjc")
+
+print find_route("customer2.us.tx.dfw")
+
+print find_route("customer2.cn.tw.tai")
+
+print find_route("customer10.us.ny.nyc")
